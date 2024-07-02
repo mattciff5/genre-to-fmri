@@ -2,3 +2,4 @@ __pycache__
 pt_save
 **/*.pt
 **/*.pkl
+**/*.pyc
