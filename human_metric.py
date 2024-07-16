@@ -37,9 +37,6 @@ def load_audio(file_path, duration=10):
 # Set the title of the app
 st.title("Audio Similarity Comparison")
 
-# Get the user's name
-name = st.text_input("Enter your name")
-
 # Load the numpy array once
 test_stim_name_avg_aligned = np.load('/srv/nfs-data/sisko/matteoc/music/test_stim_name_avg_aligned.npy', allow_pickle=True)
 
@@ -47,6 +44,10 @@ test_stim_name_avg_aligned = np.load('/srv/nfs-data/sisko/matteoc/music/test_sti
 generate_path = "/home/matteoc/genre-to-fmri/spectr_generative/human_metric/"
 
 # Initialize session state variables
+if 'name' not in st.session_state:
+    name = st.text_input("Enter your name")
+    st.session_state.name = name 
+
 if 'track' not in st.session_state:
     st.session_state.track = 0  # Start with the first track
 
@@ -139,14 +140,14 @@ else:
     st.write("Selections:", st.session_state.selected_choices)
 
     # Save the data as a JSON file
-    if name:
+    if st.session_state.name:
         data = {
-            'name': name,
+            'name': st.session_state.name,
             'selected_choices': st.session_state.selected_choices,
             'correct_ones': st.session_state.correct_ones
         }
         
-        with open(f"/srv/nfs-data/sisko/matteoc/music/{name}_human_metric.json", "w") as f:
+        with open(f"/srv/nfs-data/sisko/matteoc/music/{st.session_state.name}_human_metric.json", "w") as f:
             json.dump(data, f)
         
         st.write("Results have been saved.")
