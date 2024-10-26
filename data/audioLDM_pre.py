@@ -12,7 +12,6 @@ n_mel_channels = 64
 mel_fmin = 0
 mel_fmax = 8000
 duration = 30.0
-device = 'cpu'
 filter_length = 1024
 hop_length = 160
 win_length = 1024 
@@ -244,7 +243,7 @@ stft = STFT(
     hop_length=hop_length, 
     win_length=win_length,
     window=window
-).to(device)
+)
 
 # magnitude, phase = stft.transform(audio)
 mel_basis = librosa_mel_fn(
