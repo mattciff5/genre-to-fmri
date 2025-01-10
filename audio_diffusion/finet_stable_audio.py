@@ -23,7 +23,7 @@ processor = AutoProcessor.from_pretrained(clap_model_id)
 
 negative_prompt = "Low quality."
 generator = torch.Generator((device)).manual_seed(0)
-do_classifier_free_guidance=7.0
+do_classifier_free_guidance=7.5
 negative_prompt_embeds=None
 audio_start_in_s=0
 audio_end_in_s=10.0
@@ -112,6 +112,8 @@ for step, batch in (enumerate(val_dataloader)):
     prompt_embeds_val = get_stable_text_embd(batch_text)
     print('prompt_embeds_val: ', prompt_embeds_val.shape)
     break
+
+
         
 
 

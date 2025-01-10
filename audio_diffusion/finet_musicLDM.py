@@ -29,10 +29,10 @@ audio_tensor = torch.load('/srv/nfs-data/sisko/matteoc/music/music_data_caps_aud
 
 repo_id = "ucsd-reach/musicldm"
 musicldm_pipe = MusicLDMPipeline.from_pretrained(repo_id, torch_dtype=torch.float32)
-device = "cuda:3" if torch.cuda.is_available() else "cpu"
+device = "cuda:2" if torch.cuda.is_available() else "cpu"
 musicldm_pipe = musicldm_pipe.to(device)
 
-clap_model_id = "laion/larger_clap_music_and_speech"
+clap_model_id = "laion/clap-htsat-unfused"
 clap_model = ClapModel.from_pretrained(clap_model_id).to(device)
 clap_process = AutoProcessor.from_pretrained(clap_model_id)
 
@@ -102,6 +102,19 @@ train_dataset, val_dataset = torch.utils.data.random_split(audio_dataset, [train
 train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=4)
 val_dataloader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=4)
 
+uncond_input = musicldm_pipe.tokenizer(
+                "",
+                padding="max_length",
+                max_length=512,
+                truncation=True,
+                return_tensors="pt",
+            ).to(device)
+
+negative_prompt_embeds = musicldm_pipe.text_encoder.get_text_features(
+                uncond_input.input_ids,
+                attention_mask=uncond_input.attention_mask,
+            )
+
 for step, batch in (enumerate(val_dataloader)):
     batch_sample = 0
     batch_audio = batch[0][batch_sample].unsqueeze(0)
@@ -116,12 +129,12 @@ for step, batch in (enumerate(val_dataloader)):
     print('real_text_raw: ', real_text_val)
     audio_features_val = clap_model.get_audio_features(real_audio_val)
     audio_val_zeros = clap_model.get_audio_features(audio_val_zeros)
-    audio_features_val = torch.cat((audio_features_val, audio_val_zeros), dim=0)
+    audio_features_val = torch.cat((audio_val_zeros, audio_features_val), dim=0)
     prompt_embeds_val = musicldm_pipe._encode_prompt(
             real_text_val,
             device,
             num_waveforms_per_prompt=1,
-            do_classifier_free_guidance=2.0,
+            do_classifier_free_guidance=3.5,
             negative_prompt='',
             prompt_embeds=None,
             negative_prompt_embeds=None,
@@ -135,15 +148,15 @@ model = musicldm_pipe.unet
 
 output_type = "np"
 audio_length_in_s = 10.0
-num_inference_steps = 50
+num_inference_steps = 100
 cross_attention_kwargs = None
-guidance_scale = 5.0     # TODO: sto aggiornando
+guidance_scale = 7.0     # TODO: sto aggiornando
 do_classifier_free_guidance = guidance_scale > 1.0
 callback = None
 callback_steps = 1
 extra_step_kwargs= {}
 extra_step_kwargs["eta"] = 0.0
-extra_step_kwargs["generator"] = torch.Generator(device=device).manual_seed(55)
+extra_step_kwargs["generator"] = torch.Generator(device=device).manual_seed(42)
 
 num_epochs = 10  
 lr = 1e-4 
@@ -169,7 +182,7 @@ def training_step(batch_audio, batch_text, bs):
         device,
         num_waveforms_per_prompt=1,
         do_classifier_free_guidance=False,
-        negative_prompt="Low quality or muffled sound",
+        negative_prompt="Low quality.",
         prompt_embeds=None,
         negative_prompt_embeds=None,
     )
@@ -190,50 +203,51 @@ def training_step(batch_audio, batch_text, bs):
     
 def inference_musicldm(pipeline, model_ft, latents, features_val, device):
 
-    do_classifier_free_guidance = guidance_scale  # Modify Here
-    pipeline.scheduler.set_timesteps(num_inference_steps=num_inference_steps, device=device)
-    timesteps = pipeline.scheduler.timesteps
-    num_warmup_steps = len(timesteps) - num_inference_steps * pipeline.scheduler.order
-    with pipeline.progress_bar(total=num_inference_steps) as progress_bar:
-        for i, t in enumerate(timesteps):
-            # expand the latents if we are doing classifier free guidance
-            latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-            latent_model_input = pipeline.scheduler.scale_model_input(latent_model_input, t)
+    with torch.no_grad():
+        do_classifier_free_guidance = guidance_scale  # Modify Here
+        pipeline.scheduler.set_timesteps(num_inference_steps=num_inference_steps, device=device)
+        timesteps = pipeline.scheduler.timesteps
+        num_warmup_steps = len(timesteps) - num_inference_steps * pipeline.scheduler.order
+        with pipeline.progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+                # expand the latents if we are doing classifier free guidance
+                latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+                latent_model_input = pipeline.scheduler.scale_model_input(latent_model_input, t)
 
-            # predict the noise residual
-            noise_pred_eval = model_ft(
-                latent_model_input,
-                t,
-                encoder_hidden_states=None,
-                class_labels=features_val,
-                cross_attention_kwargs=cross_attention_kwargs,
-                return_dict=False,
-            )[0]
+                # predict the noise residual
+                noise_pred_eval = model_ft(
+                    latent_model_input,
+                    t,
+                    encoder_hidden_states=None,
+                    class_labels=features_val,
+                    cross_attention_kwargs=cross_attention_kwargs,
+                    return_dict=False,
+                )[0]
 
-            # perform guidance
-            if do_classifier_free_guidance:
-                noise_pred_uncond, noise_pred_text = noise_pred_eval.chunk(2)
-                noise_pred_eval = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+                # perform guidance
+                if do_classifier_free_guidance:
+                    noise_pred_uncond, noise_pred_text = noise_pred_eval.chunk(2)
+                    noise_pred_eval = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-            # compute the previous noisy sample x_t -> x_t-1
-            latents = pipeline.scheduler.step(noise_pred_eval, t, latents, **extra_step_kwargs).prev_sample
+                # compute the previous noisy sample x_t -> x_t-1
+                latents = pipeline.scheduler.step(noise_pred_eval, t, latents, **extra_step_kwargs).prev_sample
 
-            # call the callback, if provided
-            if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % pipeline.scheduler.order == 0):
-                progress_bar.update()
-                if callback is not None and i % callback_steps == 0:
-                    step_idx = i // getattr(pipeline.scheduler, "order", 1)
-                    callback(step_idx, t, latents)
-   
-    if not output_type == "latent":
-        latents = 1 / pipeline.vae.config.scaling_factor * latents
-        print('LATENT HAT MEAN: ', latents.mean())
-        print('LATENT HAT STD: ', latents.std()) 
-        mel_spectrogram = pipeline.vae.decode(latents).sample
+                # call the callback, if provided
+                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % pipeline.scheduler.order == 0):
+                    progress_bar.update()
+                    if callback is not None and i % callback_steps == 0:
+                        step_idx = i // getattr(pipeline.scheduler, "order", 1)
+                        callback(step_idx, t, latents)
     
-    original_waveform_length = int(audio_length_in_s * pipeline.vocoder.config.sampling_rate)
-    audio_to_save = pipeline.mel_spectrogram_to_waveform(mel_spectrogram.to(device=device))
-    audio_to_save = audio_to_save[:, :original_waveform_length]
+        if not output_type == "latent":
+            latents = 1 / pipeline.vae.config.scaling_factor * latents
+            print('LATENT HAT MEAN: ', latents.mean())
+            print('LATENT HAT STD: ', latents.std()) 
+            mel_spectrogram = pipeline.vae.decode(latents).sample
+        
+        original_waveform_length = int(audio_length_in_s * pipeline.vocoder.config.sampling_rate)
+        audio_to_save = pipeline.mel_spectrogram_to_waveform(mel_spectrogram.to(device=device))
+        audio_to_save = audio_to_save[:, :original_waveform_length]
 
     if output_type == "np":
         audio = audio_to_save.detach().numpy()

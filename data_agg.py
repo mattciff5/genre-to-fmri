@@ -19,7 +19,7 @@ from pprint import pprint
 import zipfile
 import glob
 
-from glmsingle.glmsingle import GLM_single
+# from glmsingle.glmsingle import GLM_single
 import pandas as pd
 from nilearn import maskers
 from nilearn import plotting
