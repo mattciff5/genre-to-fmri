@@ -3,3 +3,13 @@ pt_save
 **/*.pt
 **/*.pkl
 **/*.pyc
+
+*.csv
+*.yaml
+*.ckpt
+*.wav
+*.png
+*.mp4
+*.pyc
+*.pkl
+*.joblib

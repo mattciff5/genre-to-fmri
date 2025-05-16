@@ -19,7 +19,8 @@ from librosa.filters import mel as librosa_mel_fn
 import sys
 # from torch.nn import DataParallel
 # Add the root directory to the Python path
-sys.path.append(os.path.abspath(".."))
+# sys.path.append(os.path.abspath(".."))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from data.audioLDM_pre import *
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -29,7 +30,7 @@ audio_tensor = torch.load('/srv/nfs-data/sisko/matteoc/music/music_data_caps_aud
 
 repo_id = "ucsd-reach/musicldm"
 musicldm_pipe = MusicLDMPipeline.from_pretrained(repo_id, torch_dtype=torch.float32)
-device = "cuda:2" if torch.cuda.is_available() else "cpu"
+device = "cuda:7" if torch.cuda.is_available() else "cpu"
 musicldm_pipe = musicldm_pipe.to(device)
 
 clap_model_id = "laion/clap-htsat-unfused"
@@ -148,15 +149,15 @@ model = musicldm_pipe.unet
 
 output_type = "np"
 audio_length_in_s = 10.0
-num_inference_steps = 100
+num_inference_steps = 200
 cross_attention_kwargs = None
-guidance_scale = 7.0     # TODO: sto aggiornando
+guidance_scale = 2.5     # TODO: sto aggiornando
 do_classifier_free_guidance = guidance_scale > 1.0
 callback = None
 callback_steps = 1
 extra_step_kwargs= {}
 extra_step_kwargs["eta"] = 0.0
-extra_step_kwargs["generator"] = torch.Generator(device=device).manual_seed(42)
+extra_step_kwargs["generator"] = torch.Generator(device=device).manual_seed(seed)
 
 num_epochs = 10  
 lr = 1e-4 
@@ -167,8 +168,10 @@ train_losses = []
 val_losses = []
 
 import wandb 
-wandb.login(key='41a4723fac40aff96b88423b6d3e15dd64f87488')
-wandb.init()
+# wandb.sweep(project="FineTuning_MusicLDM_after")
+# wandb.login(key='41a4723fac40aff96b88423b6d3e15dd64f87488')
+wandb.init(project="FineTuning_MusicLDM_after")
+# wandb.init()
 
 
 def training_step(batch_audio, batch_text, bs):
@@ -194,7 +197,7 @@ def training_step(batch_audio, batch_text, bs):
         1000,  # height
         torch.float32,
         torch.device(device),
-        generator=torch.Generator(device=device).manual_seed(42),
+        generator=torch.Generator(device=device).manual_seed(seed),
         latents=None,
     )
 
@@ -268,15 +271,8 @@ for epoch in range(num_epochs):
         latents_real, audio_features, _, noise = training_step(batch_audio, batch_text, bs)
         del batch_train
         
-        # Sample a random timestep for each image
         timesteps = torch.randint(0, musicldm_pipe.scheduler.num_train_timesteps, (bs,), device=latents_real.device,).long()
-
-        # Add noise to the clean images according to the noise magnitude at each timestep
-        # (this is the forward diffusion process) --> we are in the training!
         noisy_latents = musicldm_pipe.scheduler.add_noise(latents_real, noise, timesteps)
-        # optimizer.zero_grad()
-
-        # Get the model prediction for the noise
         noise_pred = model(
             noisy_latents,
             timesteps,
@@ -285,18 +281,13 @@ for epoch in range(num_epochs):
             cross_attention_kwargs=None,
             return_dict=False,
         )[0]
-        
-        # Compare the prediction with the actual noise:
         loss = F.mse_loss(
             noise_pred, noise
         )  
-
-        # Store for later plotting
         train_losses.append(loss.item())
 
         # Update the model parameters with the optimizer based on this loss
         loss.backward()
-        # optimizer.step()
         wandb.log({'train_loss_step': loss.item()})
 
         # Gradient accumulation:
@@ -320,14 +311,8 @@ for epoch in range(num_epochs):
         latents_real, audio_features, _, noise = training_step(batch_audio, batch_text, bs)
         del batch_val
 
-        # Sample a random timestep for each image
         timesteps = torch.randint(0, musicldm_pipe.scheduler.num_train_timesteps, (bs,), device=latents_real.device,).long()
-
-        # Add noise to the clean images according to the noise magnitude at each timestep
-        # (this is the forward diffusion process) --> we are in the training!
         noisy_latents = musicldm_pipe.scheduler.add_noise(latents_real, noise, timesteps)
-
-        # Get the model prediction for the noise
         noise_pred = model(
             noisy_latents,
             timesteps,
@@ -336,14 +321,11 @@ for epoch in range(num_epochs):
             cross_attention_kwargs=None,
             return_dict=False,
         )[0]
-        
-        # Compare the prediction with the actual noise:
         loss = F.mse_loss(
             noise_pred, noise
         )  
-
-        # Store for later plotting
         val_losses.append(loss.item())
+
         wandb.log({'val_loss_step': loss.item()})
 
     print('LATENT MEAN: ', latents_real[0].mean())
