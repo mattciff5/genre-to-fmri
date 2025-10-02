@@ -46,6 +46,8 @@ import librosa
 from joblib import load
 import random
 from scipy.io.wavfile import write
+from himalaya.backend import set_backend
+set_backend("torch") 
 
 
 def save_spect(audio_to_save, file_name, path_to_save_img, flag):
@@ -398,7 +400,7 @@ audio_feat_to_generate = torch.tensor(audio_feat_to_generate, dtype=torch.float3
 
 
 random.seed(42)
-list_seed = [random.randint(0, 10000) for _ in range(100)]
+list_seed = [random.randint(0, 100000) for _ in range(500)]
 track_list = np.arange(0, 60) 
 
 model_path = "encoding_trained_model.joblib"
@@ -418,12 +420,12 @@ for start_track in track_list:
         file_name = os.path.splitext(os.path.basename(test_stim_name_avg_aligned[:60][start_track:stop_track][0]))[0]
         if seed == list_seed[0]:
             print('URL audio: ', test_stim_name_avg_aligned[:60][start_track:stop_track])
-            print('Audio Caption: ', test_caption_avg_aligned[:60][start_track:stop_track])
+            # print('Audio Caption: ', test_caption_avg_aligned[:60][start_track:stop_track])
             path_to_save_true = '/home/matteoc/genre-to-fmri/spectr_gen_bayes/spectr_true'
             audio_vera_wav = librosa.load(test_stim_name_avg_aligned[:60][start_track:stop_track][0], sr=16000)
             audio_widget_vera = Audio(audio_vera_wav[0][0:int(16000*(duration/2))], rate=16000)
-            save_spect(audio_vera_wav[0][0:int(16000*(duration/2))], file_name, path_to_save_true, 'vera')
-            display(audio_widget_vera)
+            # save_spect(audio_vera_wav[0][0:int(16000*(duration/2))], file_name, path_to_save_true, 'vera')
+            # display(audio_widget_vera)
         seed_gen = torch.Generator(device=device).manual_seed(int(seed))
         audio_pred_from_brain = musicldm_pipe(prompt_embeds=audio_feat_to_generate[start_track+0:stop_track+0],   # TODO: audio_feat_to_generate o test_text_feat_avg_aligned
                                     guidance_scale=2, # negative_prompt_embeds=neg_prompt_embd,
@@ -439,10 +441,10 @@ for start_track in track_list:
         corr_coeff = np.corrcoef(predictions, X_test_aligned[:60][start_track:stop_track])[0,1]
         if corr_coeff >= corr_val:
             corr_val = corr_coeff
-            path_to_save_pred = '/home/matteoc/genre-to-fmri/spectr_gen_bayes/human_metric/'
+            path_to_save_pred = '/home/matteoc/genre-to-fmri/spectr_gen_bayes_50/human_metric_500/'
             print('Best correlation: ', corr_val)
             print('Best seed: ', seed)
-            display(audio_widget)
+            # display(audio_widget)
             write(path_to_save_pred+file_name+'.wav', 16000, (audio_pred_from_brain * 32767).astype(np.int16))
 
 
